@@ -96,8 +96,10 @@ for ring_size in neurons:
 
         ax.scatter(x_y_cart[:,0], x_y_cart[:,1], c = x_y_data.index)
 
-        x_y_rings[x_y_rings<0] = x_y_rings[x_y_rings<0]+ring_size
-        x_y_rings[x_y_rings>=ring_size] = x_y_rings[x_y_rings>=ring_size]-ring_size 
+        # Wraparound, accounting for multiple wrap-arounds when needed (such as if ring distance is +/- many times the ring length)
+
+        x_y_rings[x_y_rings<0] = x_y_rings[x_y_rings<0] + np.abs(x_y_rings[x_y_rings<0]//ring_size * ring_size) # + ring_size
+        x_y_rings[x_y_rings>=ring_size] = x_y_rings[x_y_rings>=ring_size] - np.abs(x_y_rings[x_y_rings>=ring_size]//ring_size * ring_size) # - ring_size
 
         ax3.set_ylim(0, 150)
 
