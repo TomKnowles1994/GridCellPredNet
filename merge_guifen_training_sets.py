@@ -1,12 +1,22 @@
 import numpy as np
 
-def merge_training_data(data_folders, output_folder):
+def merge_training_data(data_folders, output_folder, dataset_type = 'other'):
 
-    image_files = [np.load(filename + 'images.npy') for filename in data_folders]
-
-    head_direction_files = [np.load(filename + 'networkOutput_gaussianised.npy') for filename in data_folders]
-
+    if dataset_type == 'rotation':
+        image_files = [np.load(filename + 'images.npy')[15:] for filename in data_folders]
+    if dataset_type == 'translation':
+        image_files = [np.load(filename + 'images.npy')[15:-15] for filename in data_folders]
+    else:
+        image_files = [np.load(filename + 'images.npy') for filename in data_folders]
+    
     output_image_file = np.concatenate(image_files)
+    
+    if dataset_type == 'rotation':
+        head_direction_files = [np.load(filename + 'networkOutput_gaussianised.npy')[15:] for filename in data_folders]
+    if dataset_type == 'translation':
+        head_direction_files = [np.load(filename + 'networkOutput_gaussianised.npy')[15:-15] for filename in data_folders]
+    else:
+        head_direction_files = [np.load(filename + 'networkOutput_gaussianised.npy') for filename in data_folders]
 
     output_head_direction_file = np.concatenate(head_direction_files)
 
@@ -17,7 +27,12 @@ def merge_training_data(data_folders, output_folder):
     for ring in (1, 2, 3):
         for ring_size in (30, 40, 60, 80, 120):
 
-            ring_files = [np.load(filename + 'ring_{}_gaussians_{}.npy'.format(ring, ring_size)) for filename in data_folders]
+            if dataset_type == 'rotation':
+                 ring_files = [np.load(filename + 'ring_{}_gaussians_{}.npy'.format(ring, ring_size))[15:] for filename in data_folders]
+            if dataset_type == 'translation':
+                 ring_files = [np.load(filename + 'ring_{}_gaussians_{}.npy'.format(ring, ring_size))[15:-15] for filename in data_folders]
+            else:
+                 ring_files = [np.load(filename + 'ring_{}_gaussians_{}.npy'.format(ring, ring_size)) for filename in data_folders]
 
             output_ring_file = np.concatenate(ring_files)
 
@@ -33,7 +48,7 @@ data_folders = ['C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
                 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_gazebo_3_3000/training_data_top_right/',
                 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_gazebo_3_3000/training_data_centre/']
 
-merge_training_data(data_folders, output_folder)
+merge_training_data(data_folders, output_folder, dataset_type = 'rotation')
 
 # Merge grid code (translation) data
 
@@ -48,7 +63,7 @@ data_folders = ['C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
                 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_translation_sets_3000/training_data_bm_tm/',
                 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_translation_sets_3000/training_data_tm_bm/']
 
-merge_training_data(data_folders, output_folder)
+merge_training_data(data_folders, output_folder, dataset_type = 'translation')
 
 # Merge grid and hd data for comprehensive training set (we hope)
 

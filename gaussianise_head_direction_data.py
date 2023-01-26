@@ -41,9 +41,9 @@ def gaussianise(data_path, sharpness, plot = False, cell_format = False, dataset
         #poses = np.load(data_path + '/training_set_ideo_estimate_byFrameTime.npy')[:,:391]
         #poses = np.load(data_path + '/poses.npy')
         if dataset_type == 'rotation': # Rotation datasets take some time to relocate to their true position, so we trim from the start
-            poses = np.load(data_path + '/filtered_body_poses.npy')[15:,3]
+            poses = np.load(data_path + '/filtered_body_poses.npy')[:,3]
         elif dataset_type == 'translation': # Translation datasets additionally cause a big ruckus when they bang into walls, so we trim from the end too
-            poses = np.load(data_path + '/filtered_body_poses.npy')[15:-15,3]
+            poses = np.load(data_path + '/filtered_body_poses.npy')[:,3]
         else:
             poses = np.load(data_path + '/filtered_body_poses.npy')[:,3]
 

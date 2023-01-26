@@ -40,7 +40,7 @@ for data_path in data_paths:
 
 output_folder = "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_translation_sets_3000/training_data_all/"
 
-filtered_body_pose_files = [np.load(filename + 'filtered_body_poses.npy') for filename in data_paths_translation]
+filtered_body_pose_files = [np.load(filename + 'filtered_body_poses.npy')[15:-15] for filename in data_paths_translation]
 
 output_filtered_body_pose_file = np.concatenate(filtered_body_pose_files)
 
@@ -50,7 +50,7 @@ np.save(output_folder + 'filtered_body_poses.npy', output_filtered_body_pose_fil
 
 output_folder = "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_gazebo_3_3000/training_data_all/"
 
-filtered_body_pose_files = [np.load(filename + 'filtered_body_poses.npy') for filename in data_paths_rotation]
+filtered_body_pose_files = [np.load(filename + 'filtered_body_poses.npy')[15:] for filename in data_paths_rotation]
 
 output_filtered_body_pose_file = np.concatenate(filtered_body_pose_files)
 

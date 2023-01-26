@@ -171,7 +171,7 @@ for ring_size, sigma in zip(neurons, sigmas):
 
         #x_y_data = np.loadtxt(data_folder + data_file + "body_poses.csv", delimiter = ',', skiprows = 1)[150:-150,1:3]
         #x_y_data = pd.read_csv(data_folder + data_file + "body_poses.csv").iloc[150:-150, 1:3] * vel_gain
-        x_y_data = np.load(data_folder + data_file + "filtered_body_poses.npy")[15:-15, 1:3] * vel_gain
+        x_y_data = np.load(data_folder + data_file + "filtered_body_poses.npy")[:, 1:3] * vel_gain
         x_y_data = pd.DataFrame(x_y_data, columns = ["X", "Y"])
 
         #x_y_rings = cart2ring(x_y_data[:,0], x_y_data[:,1])
@@ -277,7 +277,7 @@ for ring_size, sigma in zip(neurons, sigmas):
 data_folder = "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_gazebo_3_3000/"
 
 data_files = [  "training_data_bottom_left/", "training_data_bottom_right/", "training_data_top_left/", "training_data_top_right/",
-                "training_data_centre/", "training_data_centre_5x/", "training_data_all/"]
+                "training_data_centre/", "training_data_centre_5x/"]
 
 fig, axes = plt.subplots(1,7, sharex = True, sharey = True)
 
@@ -298,7 +298,7 @@ for ring_size, sigma in zip(neurons, sigmas):
 
         #x_y_data = np.loadtxt(data_folder + data_file + "body_poses.csv", delimiter = ',', skiprows = 1)[150:-150,1:3]
         #x_y_data = pd.read_csv(data_folder + data_file + "body_poses.csv").iloc[150:-150, 1:3] * vel_gain
-        x_y_data = np.load(data_folder + data_file + "filtered_body_poses.npy")[15:-15, 1:3] * vel_gain
+        x_y_data = np.load(data_folder + data_file + "filtered_body_poses.npy")[:, 1:3] * vel_gain
         x_y_data = pd.DataFrame(x_y_data, columns = ["X", "Y"])
 
         #x_y_rings = cart2ring(x_y_data[:,0], x_y_data[:,1])
@@ -421,7 +421,7 @@ for ring_size, sigma in zip(neurons, sigmas):
 
     #x_y_data = np.loadtxt(data_folder + data_file + "body_poses.csv", delimiter = ',', skiprows = 1)[150:-150,1:3]
     #x_y_data = pd.read_csv(data_folder + data_file + "body_poses.csv").iloc[:, 1:3] * vel_gain
-    x_y_data = np.load(data_folder + data_file + "filtered_body_poses.npy")[15:, 1:3] * vel_gain
+    x_y_data = np.load(data_folder + data_file + "filtered_body_poses.npy")[:, 1:3] * vel_gain
     x_y_data = pd.DataFrame(x_y_data, columns = ["X", "Y"])
 
     #x_y_rings = cart2ring(x_y_data[:,0], x_y_data[:,1])
@@ -563,8 +563,7 @@ def rings_to_grids(ring1, ring2, ring3, rp_window, neuron_count):
 data_folder = "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_translation_sets_3000/"
 
 data_files = [  "training_data_bl_tr/", "training_data_tr_bl/", "training_data_br_tl/", "training_data_tl_br/",
-                "training_data_lm_rm/", "training_data_rm_lm/", "training_data_tm_bm/", "training_data_bm_tm/",
-                "training_data_all/"]
+                "training_data_lm_rm/", "training_data_rm_lm/", "training_data_tm_bm/", "training_data_bm_tm/"]
 
 for data_file in data_files:
     for neuron_count in neurons:
@@ -620,7 +619,7 @@ plt.show()
 data_folder = "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_gazebo_3_3000/"
 
 data_files = [  "training_data_bottom_left/", "training_data_bottom_right/", "training_data_top_left/", "training_data_top_right/",
-                "training_data_centre/", "training_data_centre_5x/", "training_data_all/"]
+                "training_data_centre/", "training_data_centre_5x/"]
 
 for data_file in data_files:
     for neuron_count in neurons:
@@ -664,6 +663,60 @@ for data_file in data_files:
         shifted_gaussians = shifted_gaussians * scaling_factor[:, None] # Saves doing 2 transposes
 
         np.save(data_folder + data_file + "gaussian_grid_code_{}.npy".format(neuron_count), shifted_gaussians)
+
+plt.plot(grid_code[0, :])
+
+plt.plot(shifted_gaussians[0, :])
+
+plt.show()
+
+# Generate grid codes for merged (rotating and translation) dataset
+
+data_folder = "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/"
+
+data_file = "training_data_vis_hd_grid/"
+
+for neuron_count in neurons:
+    
+    ring1 = np.load(data_folder + data_file + "ring_1_gaussians_{}.npy".format(neuron_count))
+    ring2 = np.load(data_folder + data_file + "ring_2_gaussians_{}.npy".format(neuron_count))
+    ring3 = np.load(data_folder + data_file + "ring_3_gaussians_{}.npy".format(neuron_count))
+
+    grid_code = rings_to_grids(ring1, ring2, ring3, rp_window = 10, neuron_count = neuron_count)
+
+    np.save(data_folder + data_file + "grid_code_{}.npy".format(neuron_count), grid_code)
+
+    # Create a block of indices to store N gaussians, all centered on 0
+    gaussian_width = grid_code.shape[1]
+    gaussian_range = np.arange(-(gaussian_width//2),(gaussian_width//2))
+    gaussian_block = np.resize(gaussian_range, new_shape = (grid_code.shape[0], gaussian_width))
+
+    # Find where the max (active grid cell) is for each sample
+    max_locations = np.argmax(grid_code, axis = 1)
+
+    print(max_locations.shape)
+    
+    # Sigma is made relative to grid cell number to ensure a reasonable spread of 'correct enough' values
+    sigma = grid_code.shape[1] // 20
+
+    # Create a function for a 0-mean Gaussian with the desired sigma
+    pose_gaussians = norm(0, sigma)
+
+    # Apply this function onto the block of indices, giving N Gaussians all with mean 0
+    zeroed_gaussians = pose_gaussians.pdf(gaussian_block)
+
+    # Preallocate for final Gaussians
+    shifted_gaussians = np.empty_like(zeroed_gaussians)
+
+    # Move each Gaussian to its proper position, centred over the active grid cell
+    for index in range(len(max_locations)):
+        shifted_gaussians[index, :] = np.roll(zeroed_gaussians[index, :], max_locations[index]-(grid_code.shape[1]//2))
+
+    # Rescale so that the Gaussians are in range 0-1
+    scaling_factor = 1/np.max(shifted_gaussians, axis = 1)
+    shifted_gaussians = shifted_gaussians * scaling_factor[:, None] # Saves doing 2 transposes
+
+    np.save(data_folder + data_file + "gaussian_grid_code_{}.npy".format(neuron_count), shifted_gaussians)
 
 plt.plot(grid_code[0, :])
 

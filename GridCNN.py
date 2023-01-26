@@ -63,21 +63,26 @@ def shuffle_in_sync(visual_data, hd_data, grid_data):
 
     return shuffled_visual, shuffled_hd, shuffled_grid
 
-data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_translation_sets_3000/training_data_all/' # Point this to the training data folder
+data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_vis_hd_grid/' # Point this to the training data folder
 
 save_path = 'C:/Users/Tom/Downloads/HBP/model_checkpoints/guifen_experiment_reconstruction/GridCNN/' # Point this to where the checkpoints are to be saved
 
-images, head_direction, grid_code = load_npy_data(data_path, 2000, shuffle = False)
+images, head_direction, grid_code = load_npy_data(data_path, 3000, shuffle = True)
 
 def build_model():
 
     input_layer = keras.Input(shape = (45, 80, 3))
     x = keras.layers.Conv2D(32, (3, 3), activation='relu')(input_layer)
     x = keras.layers.MaxPooling2D((2, 2))(x)
+    x = keras.layers.Dropout(0.2)(x)
     x = keras.layers.Conv2D(64, (3, 3), activation='relu')(x)
+    x = keras.layers.Dropout(0.2)(x)
+    x = keras.layers.Conv2D(128, (3, 3), activation='relu')(x)
+    x = keras.layers.Dropout(0.2)(x)
     x = keras.layers.Flatten()(x)
-    output_hd = keras.layers.Dense(180)(x)
-    output_grid_1 = keras.layers.Dense(1000)(x)
+    x = keras.layers.Dropout(0.2)(x)
+    output_hd = keras.layers.Dense(180, name = 'Head_Direction')(x)
+    output_grid_1 = keras.layers.Dense(1000, name = 'Grid_30')(x)
     #output_grid_2 = keras.layers.Dense(1000)(x)
     #output_grid_3 = keras.layers.Dense(1000)(x)
     #output_grid_4 = keras.layers.Dense(1000)(x)
@@ -116,7 +121,7 @@ x_val = val_images
 
 y_val = [val_head_direction, val_grid_code[:, 0:1000]]#, val_grid_code[:, 1000:2000], val_grid_code[:, 2000:3000], val_grid_code[:, 3000:4000], val_grid_code[:, 4000:5000]]
 
-model.fit(x = images, y = y_data, validation_data = (x_val, y_val), batch_size = 10, epochs = 50, callbacks = [lr_schedule])
+model.fit(x = images, y = y_data, validation_data = (x_val, y_val), batch_size = 10, epochs = 100)#, callbacks = [lr_schedule])
 
 model.save_weights(save_path + 'main.ckpt')
 
@@ -141,18 +146,22 @@ if True:
 
     np.save(predictions_folder + "grid_1.npy", grid_1_predictions)
 
-fig, ax = plt.subplots(2,1)
+fig, ax = plt.subplots(2,5, figsize = (20, 8))
 
 plt.subplots_adjust(hspace = 0.4)
 
-ax[0].plot(test_hd[0, :], label = 'Ground Truth')
-ax[0].plot(hd_predictions[0, :], label = 'Prediction')
-ax[0].set_title("HD Predictions")
-ax[0].legend()
+for i, column in enumerate(ax[0]):
 
-ax[1].plot(test_grid_1[0, :], label = 'Ground Truth')
-ax[1].plot(grid_1_predictions[0, :], label = 'Prediction')
-ax[1].set_title("Grid 1 Predictions")
-ax[1].legend()
+    column.plot(test_hd[i * 100, :], label = 'Ground Truth')
+    column.plot(hd_predictions[i * 100, :], label = 'Prediction')
+    column.set_title("HD Predictions")
+    column.legend()
+
+for i, column in enumerate(ax[1]):
+
+    column.plot(test_grid_1[i * 100, :], label = 'Ground Truth')
+    column.plot(grid_1_predictions[i * 100, :], label = 'Prediction')
+    column.set_title("Grid 1 Predictions")
+    column.legend()
 
 plt.show()
