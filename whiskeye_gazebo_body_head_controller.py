@@ -20,14 +20,23 @@ np.set_printoptions(suppress = True, sign = ' ')
 
 data_folder = '/home/tomknowles/Desktop/'
 
-data_type = 'Train' # 'Train' (synthetic data) or 'Test' (rat data)
+data_type = 'Test' # 'Train' (synthetic data) or 'Test' (rat data)
 
 training_sets = {   'Centre'        : data_folder + 'rotation_dataset_centre.csv',
+                    'Centre5x'      : data_folder + 'rotation_dataset_centre_5x.csv',
                     'Top Left'      : data_folder + 'rotation_dataset_top_left.csv',
                     'Top Right'     : data_folder + 'rotation_dataset_top_right.csv',
                     'Bottom Left'   : data_folder + 'rotation_dataset_bottom_left.csv',
                     'Bottom Right'  : data_folder + 'rotation_dataset_bottom_right.csv',
-                    'Translation'   : data_folder + 'translation_dataset.csv'}
+                    'BL_TR'         : data_folder + 'translation_dataset_bl_tr.csv',
+                    'TR_BL'         : data_folder + 'translation_dataset_tr_bl.csv',
+                    'BR_TL'         : data_folder + 'translation_dataset_br_tl.csv',
+                    'TL_BR'         : data_folder + 'translation_dataset_tl_br.csv',
+                    'BM_TM'         : data_folder + 'translation_dataset_bm_tm.csv',
+                    'TM_BM'         : data_folder + 'translation_dataset_tm_bm.csv',
+                    'LM_RM'         : data_folder + 'translation_dataset_lm_rm.csv',
+                    'RM_LM'         : data_folder + 'translation_dataset_rm_lm.csv',
+                    }
                     
 training_set = training_sets['Centre']
                     
