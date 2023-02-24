@@ -4,15 +4,6 @@ from scipy.stats import norm, laplace
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
-sharpness = 20
-plot = True
-
-cell_format = False
-
-rescale = True
-
-distribution = "Gaussian"
-
 def preprocess_pose_data(pose_data):
     scaler = MinMaxScaler(copy=False)
     scaler.fit(pose_data)
@@ -20,7 +11,7 @@ def preprocess_pose_data(pose_data):
 
     return pose_data
 
-def gaussianise(data_path, sharpness, plot = False, cell_format = False, dataset_type = 'other'):
+def gaussianise(data_path, distribution = "Gaussian", sharpness = 20, plot = False, cell_format = False, rescale = True):
 
     N = 180
 
@@ -40,12 +31,7 @@ def gaussianise(data_path, sharpness, plot = False, cell_format = False, dataset
 
         #poses = np.load(data_path + '/training_set_ideo_estimate_byFrameTime.npy')[:,:391]
         #poses = np.load(data_path + '/poses.npy')
-        if dataset_type == 'rotation': # Rotation datasets take some time to relocate to their true position, so we trim from the start
-            poses = np.load(data_path + '/filtered_body_poses.npy')[:,3]
-        elif dataset_type == 'translation': # Translation datasets additionally cause a big ruckus when they bang into walls, so we trim from the end too
-            poses = np.load(data_path + '/filtered_body_poses.npy')[:,3]
-        else:
-            poses = np.load(data_path + '/filtered_body_poses.npy')[:,3]
+        poses = np.load(data_path + '/filtered_body_poses.npy')[:,3]
 
         if dataset is not None:
 
@@ -120,11 +106,11 @@ def gaussianise(data_path, sharpness, plot = False, cell_format = False, dataset
 
         print("Trainingset end shape: {}".format(max_locations.shape))
 
-    if distribution is "Gaussian":
+    if distribution == "Gaussian":
 
         pose_gaussians = norm(0, gaussian_width//sharpness)
 
-    if distribution is "Laplace":
+    if distribution == "Laplace":
 
         pose_gaussians = laplace(0, gaussian_width//sharpness)
 
@@ -164,41 +150,65 @@ def gaussianise(data_path, sharpness, plot = False, cell_format = False, dataset
     #np.save(data_path + '/networkOutput_gaussianised_ideo_single_rotation.npy', shifted_gaussians)
     np.save(data_path + '/networkOutput_gaussianised', shifted_gaussians)
 
-# dataset = None
-
-# gaussianise(data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/real_data_6005_timestamped', 
-#              sharpness = sharpness, 
-#              plot = plot, 
-#              cell_format = cell_format)
+# Original (Guifen-like) arena
 
 for dataset in ("training_data_centre", "training_data_top_left", "training_data_top_right", "training_data_bottom_left", 
                 "training_data_bottom_right", "training_data_centre_5x"):
 
-    gaussianise(data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_gazebo_3_3000/{}'.format(dataset), 
-                sharpness = sharpness, 
-                plot = plot, 
-                cell_format = cell_format,
-                dataset_type = 'rotation')
+    gaussianise(data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_rotation_sets_3000/{}'.format(dataset), 
+                sharpness = 20, 
+                plot = False, 
+                cell_format = False)
 
 for dataset in ("training_data_bl_tr", "training_data_tr_bl", "training_data_br_tl", "training_data_tl_br", 
                 "training_data_lm_rm", "training_data_rm_lm", "training_data_bm_tm", "training_data_tm_bm"):
 
     gaussianise(data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_translation_sets_3000/{}'.format(dataset), 
-                sharpness = sharpness, 
-                plot = plot, 
-                cell_format = cell_format,
-                dataset_type = 'translation')
+                sharpness = 20, 
+                plot = False, 
+                cell_format = False)
 
-#dataset = 1
-#if False:
-#for dataset in (1,6,10,11,12):#range(1,21):#(6,10,11,12):
-#for dataset in ("rotating_distal", "rotating_proximal", "circling_distal", "circling_proximal", "random_walk_distal", "random_walk_proximal", "cogarch"):
+gaussianise(data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/real_data_6005_timestamped/', 
+            sharpness = 20, 
+                plot = False, 
+                cell_format = False)
 
-    #gaussianise(data_path = 'C:/Users/Thomas/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_rotating_testset{}_30Hz_husky_speed'.format(dataset, dataset), 
-    #            sharpness = sharpness, 
-    #            plot = plot, 
-    #            cell_format = cell_format)
-    #gaussianise(data_path = 'C:/Users/Thomas/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_head_direction_{}'.format(dataset), 
-    #            sharpness = sharpness, 
-    #            plot = plot, 
-    #            cell_format = cell_format)
+# Dome arena
+
+# Missing 'centre' dataset
+
+for dataset in ("training_dome_top_left", "training_dome_top_right", "training_dome_bottom_left", 
+                "training_dome_bottom_right", "training_dome_centre_5x"):
+
+    gaussianise(data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_dome/training_dome_rotation_sets_3000/{}'.format(dataset), 
+                sharpness = 20, 
+                plot = False, 
+                cell_format = False)
+
+for dataset in ("training_dome_bl_tr", "training_dome_tr_bl", "training_dome_br_tl", "training_dome_tl_br", 
+                "training_dome_lm_rm", "training_dome_rm_lm", "training_dome_bm_tm", "training_dome_tm_bm"):
+
+    gaussianise(data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_dome/training_dome_translation_sets_3000/{}'.format(dataset), 
+                sharpness = 20, 
+                plot = False, 
+                cell_format = False)
+
+gaussianise(data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/real_dome_6005_timestamped/', 
+            sharpness = 20, 
+            plot = False, 
+            cell_format = False)
+
+# Oracle dataset
+
+for dataset in ("top_left", "top_right", "bottom_left", "bottom_right", "centre", "centre_5x",
+                "bl_tr", "tr_bl", "br_tl", "tl_br", "lm_rm", "rm_lm", "bm_tm", "tm_bm"):
+
+    gaussianise(data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_oracle_datasets/training_data/{}'.format(dataset), 
+                sharpness = 20, 
+                plot = True, 
+                cell_format = False)
+
+gaussianise(data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_oracle_datasets/real_rat/', 
+            sharpness = 20, 
+            plot = True, 
+            cell_format = False)
