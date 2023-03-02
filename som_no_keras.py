@@ -14,34 +14,28 @@ colourtest = False
 
 show_gradients = False
 
-def rings_to_som(data_path, sample_count = 100, map_dimensions = (10,10), topology = 'square', 
-                 ring_scale = 30, ring_type = 'index', neighbourhood = 5, neighbourhood_decay = 1,
-                 epochs = 100, learning_rate = 0.01, learning_rate_decay = 1, wraparound = False,
-                 mode = 'training', weights = None):
+ring_scale = 30
 
-    input_data = np.array([np.load(data_path + 'ring_{}_gaussians_{}.npy'.format(i, ring_scale)) for i in (1,2,3)])[:,:sample_count]
+sample_count = 3000
 
-    if ring_type == 'index' and len(input_data.shape) > 2:
-    
-        input_data = np.transpose(input_data, (1, 0, 2))
+ring_type = 'index'
 
-        input_data = np.argmax(input_data, axis = -1)
+train_som = False
 
-        input_data = (input_data - np.min(input_data)) / (np.max(input_data) - np.min(input_data))
+test_som = True
 
-    else:
-
-        input_data = np.transpose(input_data, (1, 0, 2))
-
-    if colourtest:
-
-        input_generator = np.random.default_rng()
-
-        input_data = input_generator.random(size = (sample_count, 3))
+def rings_to_som(input_data, map_dimensions = (10,10), topology = 'square', 
+                 neighbourhood = 5, neighbourhood_decay = 1,
+                 epochs = 100, learning_rate = 0.01, learning_rate_decay = 1,
+                 wraparound = False, mode = 'training', weights = None):
 
     print(input_data.shape)
 
     if weights is None:
+
+        if mode == 'inference':
+
+            raise ValueError("Must provide weights when in inference mode")
 
         random_generator = np.random.default_rng()
 
@@ -173,27 +167,35 @@ def rings_to_som(data_path, sample_count = 100, map_dimensions = (10,10), topolo
 
             frames.append(map_weights)
 
+            print("Training Epoch: {}/{}".format(epoch+1, epochs), end = '\r')
+
+        print("")
+
         return frames
 
     elif mode == 'inference':
 
-        inferences = np.zeros(shape = (input_data.shape))
+        #inferences = np.zeros(shape = (input_data.shape[0], *map_weights.shape))
+
+        inferences = np.zeros(shape = (input_data.shape[0], *map_weights.shape))
 
         for i, item in enumerate(input_data):
 
             difference =                            map_weights - item
 
-            input_distance =                        np.linalg.norm(difference, ord = 2, axis = -1)
+            # input_distance =                        np.linalg.norm(difference, ord = 2, axis = -1)
 
-            winning_node_flat =                     np.argmin(input_distance.flatten())
+            # winning_node_flat =                     np.argmin(input_distance.flatten())
 
-            winning_node_x =                        winning_node_flat // map_dimensions[0]
+            # winning_node_x =                        winning_node_flat // map_dimensions[0]
 
-            winning_node_y =                        winning_node_flat % map_dimensions[0]
+            # winning_node_y =                        winning_node_flat % map_dimensions[0]
 
-            winning_node =                          (winning_node_x, winning_node_y)
+            # winning_node =                          (winning_node_x, winning_node_y)
 
-            inferences[i, :] =                      map_weights[winning_node[0], winning_node[1], :]
+            # inferences[i, ...] =                    np.abs(map_weights - map_weights[winning_node[0], winning_node[1], :])
+
+            inferences[i, ...] =                    np.abs(difference)
 
         return inferences
 
@@ -204,43 +206,142 @@ data_path = 'C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whis
 #                         learning_rate = 0.1, learning_rate_decay = 0.1,
 #                         topology = 'square', wraparound = True)
 
-frames = rings_to_som(  data_path, epochs = 100, sample_count = 3000, map_dimensions = (10, 10), 
-                        neighbourhood = 5, neighbourhood_decay = 0.001, 
-                        learning_rate = 0.01, learning_rate_decay = 0.01,
-                        topology = 'square', wraparound = True, mode = 'training')
+# Training
 
-fig, ax = plt.subplots(1,4)
+if train_som:
 
-map1 = ax[0].imshow(frames[0][...,0], cmap = 'Reds', vmin = 0, vmax = 1, origin = 'lower')
-map2 = ax[1].imshow(frames[0][...,1], cmap = 'Greens', vmin = 0, vmax = 1, origin = 'lower')
-map3 = ax[2].imshow(frames[0][...,2], cmap = 'Blues', vmin = 0, vmax = 1, origin = 'lower')
-map4 = ax[3].imshow(frames[0][...,:], vmin = 0, vmax = 1, origin = 'lower')
+    input_data = np.array([np.load(data_path + 'ring_{}_gaussians_{}.npy'.format(i, ring_scale)) for i in (1,2,3)])[:,:sample_count]
 
-if colourtest is False:
+    if ring_type == 'index' and len(input_data.shape) > 2:
+        
+            input_data = np.transpose(input_data, (1, 0, 2))
 
-    ax[0].set_xlabel("Ring 1")
-    ax[1].set_xlabel("Ring 2")
-    ax[2].set_xlabel("Ring 3")
-    ax[3].set_xlabel("State Space")
+            input_data = np.argmax(input_data, axis = -1)
 
-elif colourtest is True:
+            input_data = (input_data - np.min(input_data)) / (np.max(input_data) - np.min(input_data))
 
-    ax[0].set_xlabel("Red")
-    ax[1].set_xlabel("Green")
-    ax[2].set_xlabel("Blue")
-    ax[3].set_xlabel("Colour Space")
+    else:
 
-def animate_som_learning(i):
+        input_data = np.transpose(input_data, (1, 0, 2))
 
-    print("Epoch {}/{}".format(i+1, len(frames)), end = '\r')
+    if colourtest:
 
-    map1.set_data(frames[i][...,0])
-    map2.set_data(frames[i][...,1])
-    map3.set_data(frames[i][...,2])
-    map4.set_data(frames[i][...,:])
+        input_generator = np.random.default_rng()
 
-    return map1, map2, map3, map4
+        input_data = input_generator.random(size = (sample_count, 3))
 
-ani = FuncAnimation(fig, animate_som_learning, frames = range(len(frames)), interval = 100, blit = True, repeat = False)
+    frames = rings_to_som(  input_data, epochs = 100, map_dimensions = (10, 10), 
+                            neighbourhood = 5, neighbourhood_decay = 0.01, 
+                            learning_rate = 0.01, learning_rate_decay = 0.1,
+                            topology = 'square', wraparound = True, mode = 'training')
 
-plt.show()
+    np.save(data_path + 'som_trained_weights.npy', frames[-1])
+
+    fig, ax = plt.subplots(1,4)
+
+    map1 = ax[0].imshow(frames[0][...,0], cmap = 'Reds', vmin = 0, vmax = 1, origin = 'lower')
+    map2 = ax[1].imshow(frames[0][...,1], cmap = 'Greens', vmin = 0, vmax = 1, origin = 'lower')
+    map3 = ax[2].imshow(frames[0][...,2], cmap = 'Blues', vmin = 0, vmax = 1, origin = 'lower')
+    map4 = ax[3].imshow(frames[0][...,:], vmin = 0, vmax = 1, origin = 'lower')
+
+    if colourtest is False:
+
+        ax[0].set_xlabel("Ring 1")
+        ax[1].set_xlabel("Ring 2")
+        ax[2].set_xlabel("Ring 3")
+        ax[3].set_xlabel("State Space")
+
+    elif colourtest is True:
+
+        ax[0].set_xlabel("Red")
+        ax[1].set_xlabel("Green")
+        ax[2].set_xlabel("Blue")
+        ax[3].set_xlabel("Colour Space")
+
+    def animate_som_learning(i):
+
+        print("Viewing Epoch {}/{}".format(i+1, len(frames)), end = '\r')
+
+        map1.set_data(frames[i][...,0])
+        map2.set_data(frames[i][...,1])
+        map3.set_data(frames[i][...,2])
+        map4.set_data(frames[i][...,:])
+
+        return map1, map2, map3, map4
+
+    ani = FuncAnimation(fig, animate_som_learning, frames = range(len(frames)), interval = 1000, blit = True, repeat = False)
+
+    plt.show()
+
+
+# Inference
+
+if test_som:
+
+    trained_weights = np.load(data_path + 'som_trained_weights.npy')
+
+    input_data = np.mgrid[1:31:1,1:31:1,1:31:1].reshape(3, -1).T
+
+    input_data_rescaled = (input_data - np.min(input_data)) / (np.max(input_data) - np.min(input_data))
+
+    print(input_data.shape)
+
+    print(input_data[0:5])
+
+    frames = rings_to_som(  input_data_rescaled, epochs = 100, map_dimensions = (10, 10), 
+                            neighbourhood = 5, neighbourhood_decay = 0.01, 
+                            learning_rate = 0.01, learning_rate_decay = 0.1,
+                            topology = 'square', wraparound = True, mode = 'inference',
+                            weights = trained_weights)
+
+    fig, ax = plt.subplots(1,4)
+
+    print(frames[0])
+
+    map1 = ax[0].imshow(trained_weights[...,0], cmap = 'Reds', vmin = 0, vmax = 1, origin = 'lower')
+    map2 = ax[1].imshow(trained_weights[...,1], cmap = 'Greens', vmin = 0, vmax = 1, origin = 'lower')
+    map3 = ax[2].imshow(trained_weights[...,2], cmap = 'Blues', vmin = 0, vmax = 1, origin = 'lower')
+    map4 = ax[3].imshow(trained_weights[...,:], vmin = 0, vmax = 1, origin = 'lower')
+
+    # scatter1 = ax[0].scatter(frames[0], c = 'black')
+    # scatter2 = ax[1].scatter(frames[0], c = 'black')
+    # scatter3 = ax[2].scatter(frames[0], c = 'black')
+    # scatter4 = ax[3].scatter(frames[0], c = 'black')
+
+    if colourtest is False:
+
+        ax[0].set_xlabel("Ring 1")
+        ax[1].set_xlabel("Ring 2")
+        ax[2].set_xlabel("Ring 3")
+        ax[3].set_xlabel("State Space")
+
+    elif colourtest is True:
+
+        ax[0].set_xlabel("Red")
+        ax[1].set_xlabel("Green")
+        ax[2].set_xlabel("Blue")
+        ax[3].set_xlabel("Colour Space")
+
+    def animate_som_inference(i):
+
+        # print("Viewing Epoch {}/{}".format(i+1, len(frames)), end = '\r')
+
+        print("Input: {}, {}, {}".format(*input_data[i]), end = '\r')
+
+        map1.set_data(frames[i][...,0])
+        map2.set_data(frames[i][...,1])
+        map3.set_data(frames[i][...,2])
+        map4.set_data(frames[i][...,:])
+
+        return map1, map2, map3, map4
+
+        # scatter1.set_data(*frames[i])
+        # scatter2.set_data(*frames[i])
+        # scatter3.set_data(*frames[i])
+        # scatter4.set_data(*frames[i])
+
+        # return scatter1, scatter2, scatter3, scatter4
+
+    ani = FuncAnimation(fig, animate_som_inference, frames = range(len(frames)), interval = 100, blit = True, repeat = False)
+
+    plt.show()
