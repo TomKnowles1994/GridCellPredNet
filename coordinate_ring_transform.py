@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 from scipy.stats import norm, laplace
 
 data_filepath = "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/real_data_6005_timestamped/"
@@ -20,7 +21,9 @@ grid_format = 'gaussian'
 # 'index': ring indexes only, shape = (?, 3*len(neurons))
 # 'gaussian': a gaussian centred over 0-999 depending on ring index combination, shape = (?, rp_window ** 3)
 
-neurons = [30, 40, 60, 80, 120]
+#neurons = [30, 40, 60, 80, 120]
+
+neurons = [40, 50, 60, 70]
 
 sigmas = [neuron_count/sharpness for neuron_count in neurons]
 
@@ -474,6 +477,64 @@ def generate_grid_codes(data_folder, data_files, neuron_count, plot = False):
 
             plt.show()
 
+def generate_place_codes(data_folder, data_files, neuron_count, plot = False, animate = False):
+
+    if plot:
+
+        fig, ax = plt.subplots(len(neurons)+1, 1)
+
+    for data_file in data_files:
+
+        print("Generating place codes for {}".format(data_file))
+
+        grids = []
+
+        for i, neuron_count in enumerate(neurons):
+            
+            grids.append(np.load(data_folder + data_file + "{}_grid_code_{}.npy".format(grid_format, neuron_count)))
+
+            if plot:
+
+                ax[i].plot(np.arange(0, 1000), grids[-1][-1])
+
+        place_code = np.sum(grids, axis = 0) / len(neurons)
+
+        np.save(data_folder + data_file + "{}_place_code.npy".format(grid_format, neuron_count), place_code)
+
+        if plot:
+
+            ax[-1].plot(np.arange(0, 1000), place_code[-1])
+
+            plt.show()
+
+        
+
+        if animate:
+
+            fig, ax = plt.subplots(len(neurons) + 1, 1, sharex = True)
+
+            g1, = ax[0].plot(np.arange(0, 1000), grids[0][0])
+            g2, = ax[1].plot(np.arange(0, 1000), grids[1][0])
+            g3, = ax[2].plot(np.arange(0, 1000), grids[2][0])
+            g4, = ax[3].plot(np.arange(0, 1000), grids[3][0])
+            pc, = ax[4].plot(np.arange(0, 1000), place_code[0])
+            text = ax[-1].text(0, 0, "")
+
+            def animate_place_code(i):
+
+                g1.set_data(np.arange(0, 1000), grids[0][i])
+                g2.set_data(np.arange(0, 1000), grids[1][i])
+                g3.set_data(np.arange(0, 1000), grids[2][i])
+                g4.set_data(np.arange(0, 1000), grids[3][i])
+                pc.set_data(np.arange(0, 1000), place_code[i])
+                text.set_text("{}/{}".format(i+1, len(grids[0])))
+
+                return g1, g2, g3, g4, pc
+        
+            ani = FuncAnimation(fig, animate_place_code, frames = len(grids[0]), interval = 100)
+
+            plt.show()
+
 def test_plot():
 
     x_start = 3.3
@@ -569,6 +630,8 @@ generate_ring_codes(data_folder = data_folder, data_files = data_files, offset =
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
 
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+
 # Convert rotation set poses to ring and grid codes
 
 data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/training_data_rotation_sets_3000/"
@@ -580,6 +643,8 @@ generate_ring_codes(data_folder = data_folder, data_files = data_files, offset =
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
 
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+
 # Convert rat trajectory poses to ring codes
 
 data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/"
@@ -590,6 +655,8 @@ generate_ring_codes(data_folder = data_folder, data_files = data_files, offset =
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
 
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+
 # Generate ring and grid codes for merged (rotating and translation) dataset
 
 data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_data/"
@@ -599,6 +666,8 @@ data_files = [  "training_data_vis_hd_grid/"]
 generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False)
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 
 # Dome arena
@@ -614,6 +683,8 @@ generate_ring_codes(data_folder = data_folder, data_files = data_files, offset =
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
 
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+
 # Generate ring and grid codes for rotation sets
 
 # Missing 'centre' dataset
@@ -627,6 +698,8 @@ generate_ring_codes(data_folder = data_folder, data_files = data_files, offset =
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
 
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+
 # Generate ring and grid codes for rat trajectory
 
 data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/"
@@ -637,6 +710,8 @@ generate_ring_codes(data_folder = data_folder, data_files = data_files, offset =
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
 
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+
 # Generate ring and grid codes for merged (rotating and translation) dataset
 
 data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_guifen_datasets/training_dome/"
@@ -646,6 +721,8 @@ data_files = [  "training_dome_vis_hd_grid/"]
 generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False)
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 
 # Oracle arena
@@ -660,6 +737,8 @@ generate_ring_codes(data_folder = data_folder, data_files = data_files, offset =
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
 
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+
 # Convert rotation set poses to ring and grid codes
 
 data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_oracle_datasets/training_data/"
@@ -669,6 +748,8 @@ data_files = [  "bottom_left/", "bottom_right/", "top_left/", "top_right/", "cen
 generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rotation')
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 # Convert rat trajectory poses to ring codes
 
@@ -680,6 +761,8 @@ generate_ring_codes(data_folder = data_folder, data_files = data_files, offset =
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
 
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = True)
+
 # Generate ring and grid codes for merged (rotating and translation) dataset
 
 data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/whiskeye_oracle_datasets/"
@@ -689,3 +772,5 @@ data_files= [   "training_data_vis_hd_grid/"]
 generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False)
 
 generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = True)
