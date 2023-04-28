@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -8,13 +9,17 @@ data_filepath = "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 
 poses = np.load(data_filepath + "filtered_body_poses.npy")[:,1:]
 
-sharpness = 40
+sharpness = 20
 
 vel_gain = 15
 
 offset = 7 # degrees of r1 (and by extension, the entire ring axes system) rotated anticlockwise from y
 
-grid_format = 'gaussian'    
+ring_gaussian = True
+
+grid_format = 'gaussian'
+
+grid_value = 'ring_distance'
 
 # One of:-
 
@@ -43,33 +48,57 @@ def cart2ring(x, y, offset):
     if x.size == 1:
 
         projection_r1 = np.dot(np.array([x, y]), np.array([x, -x / np.tan(np.radians(offset))])) / np.linalg.norm(np.array([x, -x / np.tan(np.radians(offset))]))
-        #print("Projection r_1: {}".format(projection_r1))
         projection_r2 = np.dot(np.array([x, y]), np.array([x, -x / np.tan(np.radians(60 + offset))])) / np.linalg.norm(np.array([x, -x / np.tan(np.radians(60 + offset))]))
-        #print("Projection r_2: {}".format(projection_r2))
         projection_r3 = np.dot(np.array([x, y]), np.array([x, x / np.tan(np.radians(60 - offset))])) / np.linalg.norm(np.array([x, x / np.tan(np.radians(60 - offset))]))
-        #print("Projection r_3: {}".format(projection_r3))
 
     elif x.size > 1:
 
         projection_r1 = np.array([np.dot(np.array([i, j]), np.array([i, -i / np.tan(np.radians(offset))])) / np.linalg.norm(np.array([i, -i / np.tan(np.radians(offset))])) for i, j in zip(x, y)])
-        #print("Projection r_1: {}".format(projection_r1))
         projection_r2 = np.array([np.dot(np.array([i, j]), np.array([i, -i / np.tan(np.radians(60 + offset))])) / np.linalg.norm(np.array([i, -i / np.tan(np.radians(60 + offset))])) for i, j in zip(x, y)])
-        #print("Projection r_2: {}".format(projection_r2))
         projection_r3 = np.array([np.dot(np.array([i, j]), np.array([i, i / np.tan(np.radians(60 - offset))])) / np.linalg.norm(np.array([i, i / np.tan(np.radians(60 - offset))])) for i, j in zip(x, y)])
-        #print("Projection r_3: {}".format(projection_r3))
+        
 
     else:
 
         raise NotImplementedError
+    
+    offset = offset % 360
 
-    ring1 = -np.sign(x) * projection_r1
-    ring2 = -np.sign(x) * projection_r2
-    ring3 = -np.sign(x) * projection_r3
+    if offset >= 0 and offset < 60:
 
-    # print(np.array([ring1, ring2, ring3]).T.shape)
-    # print(np.array([ring1, ring2, ring3]).shape)
-    # print(*np.array([ring1, ring2, ring3]).T)
-    # print(*np.array([ring1, ring2, ring3]))
+        ring1 = -np.sign(x) * projection_r1
+        ring2 = -np.sign(x) * projection_r2
+        ring3 = -np.sign(x) * projection_r3
+
+    elif offset >= 60 and offset < 120:
+
+        ring1 = -np.sign(x) * projection_r1
+        ring2 = -np.sign(x) * projection_r2
+        ring3 = np.sign(x) * projection_r3
+
+    elif offset >= 120 and offset < 180:
+
+        ring1 = -np.sign(x) * projection_r1
+        ring2 = np.sign(x) * projection_r2
+        ring3 = np.sign(x) * projection_r3
+
+    elif offset >= 180 and offset < 240:
+
+        ring1 = np.sign(x) * projection_r1
+        ring2 = np.sign(x) * projection_r2
+        ring3 = np.sign(x) * projection_r3
+
+    elif offset >= 240 and offset < 300:
+
+        ring1 = np.sign(x) * projection_r1
+        ring2 = np.sign(x) * projection_r2
+        ring3 = -np.sign(x) * projection_r3
+
+    elif offset >= 300 and offset < 360:
+
+        ring1 = np.sign(x) * projection_r1
+        ring2 = -np.sign(x) * projection_r2
+        ring3 = -np.sign(x) * projection_r3
 
     return np.array([ring1, ring2, ring3]).T
 
@@ -87,117 +116,229 @@ def ring2cart(ring1, ring2, ring3, offset):
 
         ring3 = np.array(ring3)
 
-    assert ring1.size > 0
+    assert ring1.size > 0    
+    
+    danger_values_r1 = [x for x in range(0, 360, 90)] # r1 will align with x or y at these offset values
+    danger_values_r2 = [x for x in range(30, 360, 90)] # r2 will align with x or y at these offset values
+    danger_values_r3 = [x for x in range(60, 360, 90)] # r3 will align with x or y at these offset values
 
     ### New method: Use intersection of normals to find the corresponding (x,y) 
     
     # Draw ring axes that span the length of the arena in question
-
-    # x = np.array([i for i in np.linspace(np.min(ring1 * np.cos(ring1)), np.max(ring1 * np.cos(ring1)), 0.01)])
-    # y = np.array([i for i in np.linspace(np.min(ring2 * np.cos(ring2)), np.max(ring2 * np.cos(ring2)), 0.01)])
-
     # The maximum extent of x and y are equal to the longest ring
     # The largest ratio of ring:cartesian values are if a ring axis is aligned exactly to x or y
     # Therefore, no point in ring space can be outside the corresponding bounds in cartesian space
 
-    max_x = np.max([ring1, ring2, ring3], axis = 0) / np.cos(np.radians(np.max([offset, offset + 60, offset + 120])))
-    min_x = -max_x
+    if offset not in danger_values_r1 and offset not in danger_values_r2 and offset not in danger_values_r3:
 
-    ring1_y = ring1 / np.cos(np.radians(offset))
-    ring2_y = ring2 / np.cos(np.radians(60 + offset))
-    ring3_y = -ring3 / np.cos(np.radians(60 - offset))
-
-    y_r1_n_start    =  -max_x * np.tan(np.radians(offset)) + ring1_y
-    y_r1_n_end      =  -min_x * np.tan(np.radians(offset)) + ring1_y
-
-    #ax.plot([min_x, max_x], [y_r1_n_start, y_r1_n_end], color = 'blue')
-
-    y_r2_n_start    =  -max_x * np.tan(np.radians(60 + offset)) + ring2_y
-    y_r2_n_end      =  -min_x * np.tan(np.radians(60 + offset)) + ring2_y
-
-    #ax.plot([min_x, max_x], [y_r2_n_start, y_r2_n_end], color = 'blue')
-
-    y_r3_n_start    =  max_x * np.tan(np.radians(60 - offset)) + ring3_y
-    y_r3_n_end      =  min_x * np.tan(np.radians(60 - offset)) + ring3_y
+        print("No danger")
     
-    #ax.plot([min_x, max_x], [y_r3_n_start, y_r3_n_end], color = 'blue')
+        max_x = np.max([ring1, ring2, ring3], axis = 0) / np.cos(np.radians(np.max([offset, offset + 60, offset + 120])))
+        min_x = -max_x
+        
+        ring1_y = ring1 / np.cos(np.radians(offset))
+        ring2_y = ring2 / np.cos(np.radians(60 + offset))
+        ring3_y = -ring3 / np.cos(np.radians(60 - offset))
 
-    # Get start and end points of ring axes
+        y_r1_n_start    =  -max_x * np.tan(np.radians(offset)) + ring1_y
+        y_r1_n_end      =  -min_x * np.tan(np.radians(offset)) + ring1_y
 
-    # start_r1_n = np.array([x[0], y_r1_n[0]])
-    # start_r2_n = np.array([x[0], y_r2_n[0]])
-    # start_r3_n = np.array([x[0], y_r3_n[0]])
+        y_r2_n_start    =  -max_x * np.tan(np.radians(60 + offset)) + ring2_y
+        y_r2_n_end      =  -min_x * np.tan(np.radians(60 + offset)) + ring2_y
 
-    # end_r1_n = np.array([x[-1], y_r1_n[-1]])
-    # end_r2_n = np.array([x[-1], y_r2_n[-1]])
-    # end_r3_n = np.array([x[-1], y_r3_n[-1]])
+        y_r3_n_start    =  max_x * np.tan(np.radians(60 - offset)) + ring3_y
+        y_r3_n_end      =  min_x * np.tan(np.radians(60 - offset)) + ring3_y
+        
+        # Get start and end points of ring axes
+        
+        start_r1_n = np.array([min_x, y_r1_n_start])
+        start_r2_n = np.array([min_x, y_r2_n_start])
+        start_r3_n = np.array([min_x, y_r3_n_start])
 
-    start_r1_n = np.array([min_x, y_r1_n_start])
-    start_r2_n = np.array([min_x, y_r2_n_start])
-    start_r3_n = np.array([min_x, y_r3_n_start])
+        end_r1_n = np.array([max_x, y_r1_n_end])
+        end_r2_n = np.array([max_x, y_r2_n_end])
+        end_r3_n = np.array([max_x, y_r3_n_end])
+        
+        x_values = np.empty(shape = (ring1.size, 3))
+        y_values = np.empty(shape = (ring1.size, 3))
+        
+        # Calculate where each pair intersects
 
-    end_r1_n = np.array([max_x, y_r1_n_end])
-    end_r2_n = np.array([max_x, y_r2_n_end])
-    end_r3_n = np.array([max_x, y_r3_n_end])
+        x1,y1 = start_r1_n
+        x2,y2 = end_r1_n
+        x3,y3 = start_r2_n
+        x4,y4 = end_r2_n
 
-    # Calculate where each pair intersects
+        denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1)
+        ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
+        ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
+        x = x3 + ua * (x4-x3)
+        y = y3 + ua * (y4-y3)
 
-    # These *should* be approximately the same, unless offset aligns a ring with x or y
+        x_values[:, 0] = x
+        y_values[:, 0] = y
 
-    x_values = np.empty(shape = (ring1.size, 3))
-    y_values = np.empty(shape = (ring1.size, 3))
+        x1,y1 = start_r2_n
+        x2,y2 = end_r2_n
+        x3,y3 = start_r3_n
+        x4,y4 = end_r3_n
 
-    x1,y1 = start_r1_n
-    x2,y2 = end_r1_n
-    x3,y3 = start_r2_n
-    x4,y4 = end_r2_n
+        denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1)
+        ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
+        ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
+        x = x3 + ua * (x4-x3)
+        y = y3 + ua * (y4-y3)
 
-    denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1)
+        x_values[:, 1] = x
+        y_values[:, 1] = y
 
-    ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
-    ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
-    x = x3 + ua * (x4-x3)
-    y = y3 + ua * (y4-y3)
+        x1,y1 = start_r1_n
+        x2,y2 = end_r1_n
+        x3,y3 = start_r3_n
+        x4,y4 = end_r3_n
 
-    x_values[:, 0] = x
-    y_values[:, 0] = y
+        denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1)
+        ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
+        ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
+        x = x3 + ua * (x4-x3)
+        y = y3 + ua * (y4-y3)
 
-    x1,y1 = start_r2_n
-    x2,y2 = end_r2_n
-    x3,y3 = start_r3_n
-    x4,y4 = end_r3_n
+        x_values[:, 2] = x
+        y_values[:, 2] = y
+    
+    elif np.any(np.isnan(ring1)) or offset in danger_values_r1:
+        
+        print("Danger r1")
 
-    denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1)
-    ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
-    ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
-    x = x3 + ua * (x4-x3)
-    y = y3 + ua * (y4-y3)
+        max_x = np.max([ring2, ring3], axis = 0) / np.cos(np.radians(np.max([offset, offset + 60, offset + 120])))
+        min_x = -max_x
+        
+        ring2_y = ring2 / np.cos(np.radians(60 + offset))
+        ring3_y = -ring3 / np.cos(np.radians(60 - offset))
 
-    x_values[:, 1] = x
-    y_values[:, 1] = y
+        y_r2_n_start    =  -max_x * np.tan(np.radians(60 + offset)) + ring2_y
+        y_r2_n_end      =  -min_x * np.tan(np.radians(60 + offset)) + ring2_y
 
-    x1,y1 = start_r1_n
-    x2,y2 = end_r1_n
-    x3,y3 = start_r3_n
-    x4,y4 = end_r3_n
+        y_r3_n_start    =  max_x * np.tan(np.radians(60 - offset)) + ring3_y
+        y_r3_n_end      =  min_x * np.tan(np.radians(60 - offset)) + ring3_y
+        
+        # Get start and end points of ring axes
+        
+        start_r2_n = np.array([min_x, y_r2_n_start])
+        start_r3_n = np.array([min_x, y_r3_n_start])
 
-    denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1)
-    ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
-    ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
-    x = x3 + ua * (x4-x3)
-    y = y3 + ua * (y4-y3)
+        end_r2_n = np.array([max_x, y_r2_n_end])
+        end_r3_n = np.array([max_x, y_r3_n_end])
+        
+        x_values = np.empty(shape = (ring1.size, 1))
+        y_values = np.empty(shape = (ring1.size, 1))
+        
+        # Calculate where each pair intersects
 
-    x_values[:, 2] = x
-    y_values[:, 2] = y
+        x1,y1 = start_r2_n
+        x2,y2 = end_r2_n
+        x3,y3 = start_r3_n
+        x4,y4 = end_r3_n
 
-    x = np.squeeze(np.mean(np.array(x_values), axis = 1))
+        denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1)
+        ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
+        ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
+        x = x3 + ua * (x4-x3)
+        y = y3 + ua * (y4-y3)
+
+        x_values[:, 0] = x
+        y_values[:, 0] = y
+        
+    elif np.any(np.isnan(ring2)) or offset in danger_values_r2:
+
+        print("Danger r2")
+        
+        max_x = np.max([ring1, ring3], axis = 0) / np.cos(np.radians(np.max([offset, offset + 60, offset + 120])))
+        min_x = -max_x
+        
+        ring1_y = ring1 / np.cos(np.radians(offset))
+        ring3_y = -ring3 / np.cos(np.radians(60 - offset))
+
+        y_r1_n_start    =  -max_x * np.tan(np.radians(offset)) + ring1_y
+        y_r1_n_end      =  -min_x * np.tan(np.radians(offset)) + ring1_y
+
+        y_r3_n_start    =  max_x * np.tan(np.radians(60 - offset)) + ring3_y
+        y_r3_n_end      =  min_x * np.tan(np.radians(60 - offset)) + ring3_y
+        
+        # Get start and end points of ring axes
+        
+        start_r1_n = np.array([min_x, y_r1_n_start])
+        start_r3_n = np.array([min_x, y_r3_n_start])
+
+        end_r1_n = np.array([max_x, y_r1_n_end])
+        end_r3_n = np.array([max_x, y_r3_n_end])
+        
+        x_values = np.empty(shape = (ring1.size, 1))
+        y_values = np.empty(shape = (ring1.size, 1))
+        
+        # Calculate where each pair intersects
+
+        x1,y1 = start_r1_n
+        x2,y2 = end_r1_n
+        x3,y3 = start_r3_n
+        x4,y4 = end_r3_n
+
+        denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1)
+        ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
+        ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
+        x = x3 + ua * (x4-x3)
+        y = y3 + ua * (y4-y3)
+
+        x_values[:, 0] = x
+        y_values[:, 0] = y
+        
+    elif np.any(np.isnan(ring3)) or offset in danger_values_r3:
+
+        print("Danger r3")
+        
+        max_x = np.max([ring2, ring3], axis = 0) / np.cos(np.radians(np.max([offset, offset + 60, offset + 120])))
+        min_x = -max_x
+        
+        ring1_y = ring1 / np.cos(np.radians(offset))
+        ring2_y = ring2 / np.cos(np.radians(60 + offset))
+
+        y_r1_n_start    =  -max_x * np.tan(np.radians(offset)) + ring1_y
+        y_r1_n_end      =  -min_x * np.tan(np.radians(offset)) + ring1_y
+
+        y_r2_n_start    =  -max_x * np.tan(np.radians(60 + offset)) + ring2_y
+        y_r2_n_end      =  -min_x * np.tan(np.radians(60 + offset)) + ring2_y
+        
+        # Get start and end points of ring axes
+        
+        start_r1_n = np.array([min_x, y_r1_n_start])
+        start_r2_n = np.array([min_x, y_r2_n_start])
+
+        end_r1_n = np.array([max_x, y_r1_n_end])
+        end_r2_n = np.array([max_x, y_r2_n_end])
+        
+        x_values = np.empty(shape = (ring1.size, 1))
+        y_values = np.empty(shape = (ring1.size, 1))
+        
+        # Calculate where each pair intersects
+
+        x1,y1 = start_r1_n
+        x2,y2 = end_r1_n
+        x3,y3 = start_r2_n
+        x4,y4 = end_r2_n
+
+        denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1)
+        ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
+        ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
+        x = x3 + ua * (x4-x3)
+        y = y3 + ua * (y4-y3)
+
+        x_values[:, 0] = x
+        y_values[:, 0] = y
+        
+
+    x = np.squeeze(np.mean(x_values, axis = 1))
     y = np.squeeze(np.mean(np.array(y_values), axis = 1))
-
-    # print(np.array([x, y]).T.shape)
-    # print(np.array([x, y]).shape)
-    # print(*np.array([x, y]).T)
-    # print(*np.array([x, y]))
-
+    
     return np.array([x, y]).T
 
 def wrap_to_distance(distance, boundary):
@@ -209,7 +350,7 @@ def wrap_to_distance(distance, boundary):
     
     return wrapped
 
-def generate_ring_codes(data_folder, data_files, offset, vel_gain = 1, plot = False, data_type = None):
+def generate_ring_codes(data_folder, data_files, offset, vel_gain = 1, plot = False, data_type = None, ring_gaussian = False):
 
     # if plot and data_type is None:
 
@@ -302,124 +443,229 @@ def generate_ring_codes(data_folder, data_files, offset, vel_gain = 1, plot = Fa
 
             np.save(data_folder + data_file + "ring_indexes_{}.npy".format(ring_size), x_y_rings)
 
-            # Create 3 blocks of indices to store ring_size gaussians, all centered on 0
+            if ring_gaussian is True:
 
-            gaussian_range = np.arange(-(ring_size//2),(ring_size//2))
+                # Create 3 blocks of indices to store ring_size gaussians, all centered on 0
 
-            x_y_ring_1_gaussians = np.resize(gaussian_range, new_shape = (len(x_y_rings), ring_size))
-            x_y_ring_2_gaussians = np.resize(gaussian_range, new_shape = (len(x_y_rings), ring_size))
-            x_y_ring_3_gaussians = np.resize(gaussian_range, new_shape = (len(x_y_rings), ring_size))
+                gaussian_range = np.arange(-(ring_size//2),(ring_size//2))
 
-            # Find where the max (active grid cell) is for each ring
-            max_locations_ring_1 = np.round(x_y_rings[:,0]).astype(int)
-            max_locations_ring_2 = np.round(x_y_rings[:,1]).astype(int)
-            max_locations_ring_3 = np.round(x_y_rings[:,2]).astype(int)
+                x_y_ring_1_gaussians = np.resize(gaussian_range, new_shape = (len(x_y_rings), ring_size))
+                x_y_ring_2_gaussians = np.resize(gaussian_range, new_shape = (len(x_y_rings), ring_size))
+                x_y_ring_3_gaussians = np.resize(gaussian_range, new_shape = (len(x_y_rings), ring_size))
 
-            # Create a function for a 0-mean Gaussian with the desired sigma
-            pose_gaussians = norm(0, sigma)
+                # Find where the max (active grid cell) is for each ring
+                max_locations_ring_1 = np.round(x_y_rings[:,0]).astype(int)
+                max_locations_ring_2 = np.round(x_y_rings[:,1]).astype(int)
+                max_locations_ring_3 = np.round(x_y_rings[:,2]).astype(int)
 
-            # Apply this function onto the block of indices, giving N Gaussians all with mean 0
-            zeroed_gaussians_ring_1 = pose_gaussians.pdf(x_y_ring_1_gaussians)
-            zeroed_gaussians_ring_2 = pose_gaussians.pdf(x_y_ring_2_gaussians)
-            zeroed_gaussians_ring_3 = pose_gaussians.pdf(x_y_ring_3_gaussians)
+                # Create a function for a 0-mean Gaussian with the desired sigma
+                pose_gaussians = norm(0, sigma)
 
-            # Preallocate for final Gaussians
-            shifted_gaussians_ring_1 = np.empty_like(zeroed_gaussians_ring_1)
-            shifted_gaussians_ring_2 = np.empty_like(zeroed_gaussians_ring_2)
-            shifted_gaussians_ring_3 = np.empty_like(zeroed_gaussians_ring_3)
+                # Apply this function onto the block of indices, giving N Gaussians all with mean 0
+                zeroed_gaussians_ring_1 = pose_gaussians.pdf(x_y_ring_1_gaussians)
+                zeroed_gaussians_ring_2 = pose_gaussians.pdf(x_y_ring_2_gaussians)
+                zeroed_gaussians_ring_3 = pose_gaussians.pdf(x_y_ring_3_gaussians)
 
-            # Move each Gaussian to its proper position, centred over the active grid cell
-            #shifted_gaussians_ring_1 = np.roll(zeroed_gaussians_ring_1, max_locations_ring_1-(ring_size//2), axis = 1)
-            #shifted_gaussians_ring_2 = np.roll(zeroed_gaussians_ring_2, max_locations_ring_2-(ring_size//2), axis = 1)
-            #shifted_gaussians_ring_3 = np.roll(zeroed_gaussians_ring_3, max_locations_ring_3-(ring_size//2), axis = 1)
+                # Preallocate for final Gaussians
+                shifted_gaussians_ring_1 = np.empty_like(zeroed_gaussians_ring_1)
+                shifted_gaussians_ring_2 = np.empty_like(zeroed_gaussians_ring_2)
+                shifted_gaussians_ring_3 = np.empty_like(zeroed_gaussians_ring_3)
 
-            # Move each Gaussian to its proper position, centred over the active grid cell
-            for index in range(len(max_locations_ring_1)):
-                shifted_gaussians_ring_1[index, :] = np.roll(zeroed_gaussians_ring_1[index, :], max_locations_ring_1[index]-(ring_size//2))
-            for index in range(len(max_locations_ring_2)):
-                shifted_gaussians_ring_2[index, :] = np.roll(zeroed_gaussians_ring_2[index, :], max_locations_ring_2[index]-(ring_size//2))
-            for index in range(len(max_locations_ring_3)):
-                shifted_gaussians_ring_3[index, :] = np.roll(zeroed_gaussians_ring_3[index, :], max_locations_ring_3[index]-(ring_size//2))
+                # Move each Gaussian to its proper position, centred over the active grid cell
+                #shifted_gaussians_ring_1 = np.roll(zeroed_gaussians_ring_1, max_locations_ring_1-(ring_size//2), axis = 1)
+                #shifted_gaussians_ring_2 = np.roll(zeroed_gaussians_ring_2, max_locations_ring_2-(ring_size//2), axis = 1)
+                #shifted_gaussians_ring_3 = np.roll(zeroed_gaussians_ring_3, max_locations_ring_3-(ring_size//2), axis = 1)
 
-            # Rescale so that the Gaussians are in range 0-1
-            shifted_gaussians_ring_1 = shifted_gaussians_ring_1.T * 1/np.max(shifted_gaussians_ring_1, axis = 1)
-            shifted_gaussians_ring_2 = shifted_gaussians_ring_2.T * 1/np.max(shifted_gaussians_ring_2, axis = 1)
-            shifted_gaussians_ring_3 = shifted_gaussians_ring_3.T * 1/np.max(shifted_gaussians_ring_3, axis = 1)
+                # Move each Gaussian to its proper position, centred over the active grid cell
+                for index in range(len(max_locations_ring_1)):
+                    shifted_gaussians_ring_1[index, :] = np.roll(zeroed_gaussians_ring_1[index, :], max_locations_ring_1[index]-(ring_size//2))
+                for index in range(len(max_locations_ring_2)):
+                    shifted_gaussians_ring_2[index, :] = np.roll(zeroed_gaussians_ring_2[index, :], max_locations_ring_2[index]-(ring_size//2))
+                for index in range(len(max_locations_ring_3)):
+                    shifted_gaussians_ring_3[index, :] = np.roll(zeroed_gaussians_ring_3[index, :], max_locations_ring_3[index]-(ring_size//2))
 
-            shifted_gaussians_ring_1 = shifted_gaussians_ring_1.T
-            shifted_gaussians_ring_2 = shifted_gaussians_ring_2.T
-            shifted_gaussians_ring_3 = shifted_gaussians_ring_3.T
+                # Rescale so that the Gaussians are in range 0-1
+                shifted_gaussians_ring_1 = shifted_gaussians_ring_1.T * 1/np.max(shifted_gaussians_ring_1, axis = 1)
+                shifted_gaussians_ring_2 = shifted_gaussians_ring_2.T * 1/np.max(shifted_gaussians_ring_2, axis = 1)
+                shifted_gaussians_ring_3 = shifted_gaussians_ring_3.T * 1/np.max(shifted_gaussians_ring_3, axis = 1)
 
-            # if plot:
+                shifted_gaussians_ring_1 = shifted_gaussians_ring_1.T
+                shifted_gaussians_ring_2 = shifted_gaussians_ring_2.T
+                shifted_gaussians_ring_3 = shifted_gaussians_ring_3.T
 
-            #     for i in range(0, 60, 10):
-            #         ax2[0].plot(shifted_gaussians_ring_1[i,:])
-            #         ax2[0].vlines(max_locations_ring_1[i], 0., 1.1, color = 'grey')
-            #         #ax2[0].set_xlabel("Head Direction")
-            #         #ax2[0].set_ylabel("Pseudo-probability")
-            #         #ax2[0].set_title("Ground Truth Data")
+                if plot:
 
-            #     for i in range(0, 60, 10):
-            #         ax2[1].plot(shifted_gaussians_ring_2[i,:])
-            #         ax2[1].vlines(max_locations_ring_2[i], 0., 1.1, color = 'grey')
-            #         #ax2[1].set_xlabel("Head Direction")
-            #         #ax2[1].set_ylabel("Pseudo-probability")
-            #         #ax2[1].set_title("Ground Truth Data")
+                #     for i in range(0, 60, 10):
+                #         ax2[0].plot(shifted_gaussians_ring_1[i,:])
+                #         ax2[0].vlines(max_locations_ring_1[i], 0., 1.1, color = 'grey')
+                #         #ax2[0].set_xlabel("Head Direction")
+                #         #ax2[0].set_ylabel("Pseudo-probability")
+                #         #ax2[0].set_title("Ground Truth Data")
 
-            #     for i in range(0, 60, 10):
-            #         ax2[2].plot(shifted_gaussians_ring_3[i,:])
-            #         ax2[2].vlines(max_locations_ring_3[i], 0., 1.1, color = 'grey')
-            #         #ax2[2].set_xlabel("Head Direction")
-            #         #ax2[2].set_ylabel("Pseudo-probability")
-            #         #ax2[2].set_title("Ground Truth Data")
+                #     for i in range(0, 60, 10):
+                #         ax2[1].plot(shifted_gaussians_ring_2[i,:])
+                #         ax2[1].vlines(max_locations_ring_2[i], 0., 1.1, color = 'grey')
+                #         #ax2[1].set_xlabel("Head Direction")
+                #         #ax2[1].set_ylabel("Pseudo-probability")
+                #         #ax2[1].set_title("Ground Truth Data")
 
-            np.save(data_folder + data_file + "ring_1_gaussians_{}.npy".format(ring_size), shifted_gaussians_ring_1)
-            np.save(data_folder + data_file + "ring_2_gaussians_{}.npy".format(ring_size), shifted_gaussians_ring_2)
-            np.save(data_folder + data_file + "ring_3_gaussians_{}.npy".format(ring_size), shifted_gaussians_ring_3)
+                #     for i in range(0, 60, 10):
+                #         ax2[2].plot(shifted_gaussians_ring_3[i,:])
+                #         ax2[2].vlines(max_locations_ring_3[i], 0., 1.1, color = 'grey')
+                #         #ax2[2].set_xlabel("Head Direction")
+                #         #ax2[2].set_ylabel("Pseudo-probability")
+                #         #ax2[2].set_title("Ground Truth Data")
+
+                    plt.plot(shifted_gaussians_ring_1[100])
+                    plt.plot(shifted_gaussians_ring_2[100])
+                    plt.plot(shifted_gaussians_ring_3[100])
+
+                np.save(data_folder + data_file + "ring_1_gaussians_{}.npy".format(ring_size), shifted_gaussians_ring_1)
+                np.save(data_folder + data_file + "ring_2_gaussians_{}.npy".format(ring_size), shifted_gaussians_ring_2)
+                np.save(data_folder + data_file + "ring_3_gaussians_{}.npy".format(ring_size), shifted_gaussians_ring_3)
 
     if plot:
 
         plt.show()
 
-def rings_to_grids(ring1, ring2, ring3, rp_window, neuron_count, grid_format = "gaussian"):
+def rings_to_grids(ring1, ring2, ring3, rp_window, neuron_count, grid_value = "ring_value", grid_format = "gaussian"):
 
     grid_cells = np.zeros(shape = (len(ring1), rp_window ** 3))
 
     neurons_per_rp = neuron_count // rp_window
 
-    plt.show()
+    if grid_value == 'ring_value':
 
-    peak_locations_ring1 = np.argmax(ring1, axis = 1)
-    peak_locations_ring2 = np.argmax(ring2, axis = 1)
-    peak_locations_ring3 = np.argmax(ring3, axis = 1)
+        peak_locations_ring1 = np.argmax(ring1, axis = 1)
+        peak_locations_ring2 = np.argmax(ring2, axis = 1)
+        peak_locations_ring3 = np.argmax(ring3, axis = 1)
 
-    rp_locations_ring1 = peak_locations_ring1 // neurons_per_rp
-    rp_locations_ring2 = peak_locations_ring2 // neurons_per_rp
-    rp_locations_ring3 = peak_locations_ring3 // neurons_per_rp
+        rp_locations_ring1 = peak_locations_ring1 // neurons_per_rp
+        rp_locations_ring2 = peak_locations_ring2 // neurons_per_rp
+        rp_locations_ring3 = peak_locations_ring3 // neurons_per_rp
 
-    if grid_format == 'gaussian':
+        if grid_format == 'gaussian':
 
-        active_grid_cells = rp_locations_ring1 + rp_locations_ring2 * rp_window + rp_locations_ring3 * rp_window ** 2
+            active_grid_cells = rp_locations_ring1 + rp_locations_ring2 * rp_window + rp_locations_ring3 * rp_window ** 2
 
-    elif grid_format == 'index':
+        elif grid_format == 'index':
 
-        active_grid_cells = np.array([rp_locations_ring1, rp_locations_ring2, rp_locations_ring3]).T
+            active_grid_cells = np.array([rp_locations_ring1, rp_locations_ring2, rp_locations_ring3]).T
 
-    #print("Active grid cells shape = {}".format(active_grid_cells.shape))
+        #print("Active grid cells shape = {}".format(active_grid_cells.shape))
 
-    active_grid_cells = active_grid_cells.astype(np.int)
+        active_grid_cells = active_grid_cells.astype(int)
 
-    if grid_format == 'gaussian':
+        if grid_format == 'gaussian':
 
-        grid_cells[np.arange(active_grid_cells.size), active_grid_cells] = 1 # [:, index] assigns across every column, every row; [range, index] assigns to one column per row
+            grid_cells[np.arange(active_grid_cells.size), active_grid_cells] = 1 # [:, index] assigns across every column, every row; [range, index] assigns to one column per row
 
-    elif grid_format == 'index':
+        elif grid_format == 'index':
 
-        grid_cells = active_grid_cells
+            grid_cells = active_grid_cells
+
+    elif grid_value == 'ring_distance':
+
+        # New way to calculate grid cell values:
+
+        # Which grid cell is most active is not important - no winner-takes-all
+        # Each grid cell is a set of vertices of a hexagon grid, with coordinates r1, r2, r3
+        # Distance of (r1, r2, r3) to each grid cell vertex is calculated
+        # Proximity is equal to activity
+        # This constellation of grid cells in turn causes a constellation of place cells to be active
+
+        rp_index            = np.repeat(np.arange(0, rp_window), len(ring1)).reshape(rp_window, -1).T
+
+        print(rp_index[0])
+        print(rp_index.shape)
+
+        max_method = False
+
+        if max_method:
+
+            # In this method, only the centre of the gaussian (or the index directly) is used
+
+            peak_locations_ring1 = np.argmax(ring1, axis = 1)
+            peak_locations_ring2 = np.argmax(ring2, axis = 1)
+            peak_locations_ring3 = np.argmax(ring3, axis = 1)
+
+            rp_locations_ring1 = peak_locations_ring1 // neurons_per_rp
+            rp_locations_ring2 = peak_locations_ring2 // neurons_per_rp
+            rp_locations_ring3 = peak_locations_ring3 // neurons_per_rp
+
+            print(np.min(rp_locations_ring1))
+            print(np.max(rp_locations_ring1))
+
+            distance_ring1      = rp_index                  - rp_locations_ring1[:, None]
+            distance_ring1_l    = (rp_index - rp_window)    - rp_locations_ring1[:, None]
+            distance_ring1_r    = (rp_index + rp_window)    - rp_locations_ring1[:, None]
+
+            distance_ring1      = np.min([np.abs(distance_ring1), np.abs(distance_ring1_l), np.abs(distance_ring1_r)], axis = 0)
+
+            activity_ring1      = np.exp((-distance_ring1 ** 2) / (2 * (rp_window / 4) ** 2))
+
+            distance_ring2      = rp_index                  - rp_locations_ring2[:, None]
+            distance_ring2_l    = (rp_index - rp_window)    - rp_locations_ring2[:, None]
+            distance_ring2_r    = (rp_index + rp_window)    - rp_locations_ring2[:, None]
+
+            distance_ring2      = np.min([np.abs(distance_ring2), np.abs(distance_ring2_l), np.abs(distance_ring2_r)], axis = 0)
+
+            activity_ring2      = np.exp((-distance_ring2 ** 2) / (2 * (rp_window / 4) ** 2))
+
+            distance_ring3      = rp_index                  - rp_locations_ring3[:, None]
+            distance_ring3_l    = (rp_index - rp_window)    - rp_locations_ring3[:, None]
+            distance_ring3_r    = (rp_index + rp_window)    - rp_locations_ring3[:, None]
+
+            distance_ring3      = np.min([np.abs(distance_ring3), np.abs(distance_ring3_l), np.abs(distance_ring3_r)], axis = 0)
+
+            activity_ring3      = np.exp((-distance_ring3 ** 2) / (2 * (rp_window / 4) ** 2))
+
+            grid_cells          = np.sum([activity_ring1, activity_ring2, activity_ring3], axis = 0)
+
+        else:
+
+            # In this method, the whole gaussian activity is compared to the grid cell connection
+
+            print(ring1.shape)
+
+            print(sliding_window_view(ring1, window_shape = neurons_per_rp, axis = 1)[:, ::neurons_per_rp, :].shape)
+
+            rp_activity_ring1 = np.sum(sliding_window_view(ring1, window_shape = neurons_per_rp, axis = 1)[:, ::neurons_per_rp, :], axis = -1)
+            rp_activity_ring2 = np.sum(sliding_window_view(ring2, window_shape = neurons_per_rp, axis = 1)[:, ::neurons_per_rp, :], axis = -1)
+            rp_activity_ring3 = np.sum(sliding_window_view(ring3, window_shape = neurons_per_rp, axis = 1)[:, ::neurons_per_rp, :], axis = -1)
+
+            print(rp_activity_ring1.shape)
+
+            print(rp_index.shape)
+
+            grid_cells          = np.sum([rp_activity_ring1, rp_activity_ring2, rp_activity_ring3], axis = 0)
+
+            grid_cells          = np.empty(shape = (len(ring1), rp_window ** 3))
+
+            for i in range(len(ring1)):
+                for j, r1 in enumerate(rp_activity_ring1[i]):
+                    for k, r2 in enumerate(rp_activity_ring2[i]):
+                        for l, r3 in enumerate(rp_activity_ring3[i]):
+
+                            grid_cells[i, (j * rp_window ** 2) +  (k * rp_window) +  l] = np.sum([r1, r2, r3])
+
+                print(f"{i+1}/{len(ring1)}", end = '\r')
+
+            print(grid_cells.shape)
+
+            plt.scatter(np.arange(1000), grid_cells[0])
+
+            plt.show()
+
+            plt.scatter(np.arange(10), rp_activity_ring1[0])
+            plt.scatter(np.arange(10), rp_activity_ring2[0])
+            plt.scatter(np.arange(10), rp_activity_ring3[0])
+
+            plt.show()
 
     return grid_cells
 
-def generate_grid_codes(data_folder, data_files, neuron_count, plot = False):
+def generate_grid_codes(data_folder, data_files, neuron_count, plot = False, grid_value = "ring_value", grid_format = "gaussian"):
 
     for data_file in data_files:
 
@@ -435,49 +681,53 @@ def generate_grid_codes(data_folder, data_files, neuron_count, plot = False):
             # print("Ring 2 Shape: {}".format(ring2.shape))
             # print("Ring 3 Shape: {}".format(ring3.shape))
 
-            grid_code = rings_to_grids(ring1, ring2, ring3, rp_window = 10, neuron_count = neuron_count)
+            grid_code = rings_to_grids(ring1, ring2, ring3, rp_window = 10, neuron_count = neuron_count, grid_value = grid_value, grid_format = grid_format)
 
             np.save(data_folder + data_file + "grid_code_{}.npy".format(neuron_count), grid_code)
 
-            # Create a block of indices to store N gaussians, all centered on 0
-            gaussian_width = grid_code.shape[1]
-            gaussian_range = np.arange(-(gaussian_width//2),(gaussian_width//2))
-            gaussian_block = np.resize(gaussian_range, new_shape = (grid_code.shape[0], gaussian_width))
+            if grid_format == "gaussian" and grid_value == 'ring_value':
 
-            # Find where the max (active grid cell) is for each sample
-            max_locations = np.argmax(grid_code, axis = 1)
+                # Create a block of indices to store N gaussians, all centered on 0
+                gaussian_width = grid_code.shape[1]
+                gaussian_range = np.arange(-(gaussian_width//2),(gaussian_width//2))
+                gaussian_block = np.resize(gaussian_range, new_shape = (grid_code.shape[0], gaussian_width))
 
-            # Sigma is made relative to grid cell number to ensure a reasonable spread of 'correct enough' values
-            sigma = grid_code.shape[1] / sharpness
+                # Find where the max (active grid cell) is for each sample
+                max_locations = np.argmax(grid_code, axis = 1)
 
-            # Create a function for a 0-mean Gaussian with the desired sigma
-            pose_gaussians = norm(0, sigma)
+                # Sigma is made relative to grid cell number to ensure a reasonable spread of 'correct enough' values
+                sigma = grid_code.shape[1] / sharpness
 
-            # Apply this function onto the block of indices, giving N Gaussians all with mean 0
-            zeroed_gaussians = pose_gaussians.pdf(gaussian_block)
+                # Create a function for a 0-mean Gaussian with the desired sigma
+                pose_gaussians = norm(0, sigma)
 
-            # Preallocate for final Gaussians
-            shifted_gaussians = np.empty_like(zeroed_gaussians)
+                # Apply this function onto the block of indices, giving N Gaussians all with mean 0
+                zeroed_gaussians = pose_gaussians.pdf(gaussian_block)
 
-            # Move each Gaussian to its proper position, centred over the active grid cell
-            for index in range(len(max_locations)):
-                shifted_gaussians[index, :] = np.roll(zeroed_gaussians[index, :], max_locations[index]-(grid_code.shape[1]//2))
+                # Preallocate for final Gaussians
+                shifted_gaussians = np.empty_like(zeroed_gaussians)
 
-            # Rescale so that the Gaussians are in range 0-1
-            scaling_factor = 1/np.max(shifted_gaussians, axis = 1)
-            shifted_gaussians = shifted_gaussians * scaling_factor[:, None] # Saves doing 2 transposes
+                # Move each Gaussian to its proper position, centred over the active grid cell
+                for index in range(len(max_locations)):
+                    shifted_gaussians[index, :] = np.roll(zeroed_gaussians[index, :], max_locations[index]-(grid_code.shape[1]//2))
 
-            np.save(data_folder + data_file + "{}_grid_code_{}.npy".format(grid_format, neuron_count), shifted_gaussians)
+                # Rescale so that the Gaussians are in range 0-1
+                scaling_factor = 1/np.max(shifted_gaussians, axis = 1)
+                shifted_gaussians = shifted_gaussians * scaling_factor[:, None] # Saves doing 2 transposes
+
+                np.save(data_folder + data_file + "{}_grid_code_{}.npy".format(grid_format, neuron_count), shifted_gaussians)
 
         if plot:
 
             plt.plot(grid_code[0, :])
 
-            plt.plot(shifted_gaussians[0, :])
+            if grid_format == "gaussian" and grid_value == 'ring_value':
+
+                plt.plot(shifted_gaussians[0, :])
 
             plt.show()
 
-def generate_place_codes(data_folder, data_files, neuron_count, plot = False, animate = False):
+def generate_place_codes(data_folder, data_files, neuron_count, plot = False, animate = False, grid_value = 'ring_distance'):
 
     if plot:
 
@@ -491,7 +741,7 @@ def generate_place_codes(data_folder, data_files, neuron_count, plot = False, an
 
         for i, neuron_count in enumerate(neurons):
             
-            grids.append(np.load(data_folder + data_file + "{}_grid_code_{}.npy".format(grid_format, neuron_count)))
+            grids.append(np.load(data_folder + data_file + "grid_code_{}.npy".format(neuron_count)))
 
             if plot:
 
@@ -499,7 +749,7 @@ def generate_place_codes(data_folder, data_files, neuron_count, plot = False, an
 
         place_code = np.sum(grids, axis = 0) / len(neurons)
 
-        np.save(data_folder + data_file + "{}_place_code.npy".format(grid_format, neuron_count), place_code)
+        np.save(data_folder + data_file + "place_code.npy", place_code)
 
         if plot:
 
@@ -511,27 +761,63 @@ def generate_place_codes(data_folder, data_files, neuron_count, plot = False, an
 
         if animate:
 
-            fig, ax = plt.subplots(len(neurons) + 1, 1, sharex = True)
+            if grid_value == "ring_distance":
 
-            g1, = ax[0].plot(np.arange(0, 1000), grids[0][0])
-            g2, = ax[1].plot(np.arange(0, 1000), grids[1][0])
-            g3, = ax[2].plot(np.arange(0, 1000), grids[2][0])
-            g4, = ax[3].plot(np.arange(0, 1000), grids[3][0])
-            pc, = ax[4].plot(np.arange(0, 1000), place_code[0])
-            text = ax[-1].text(0, 0, "")
+                fig, ax = plt.subplots(len(neurons) + 1, 1, sharex = True)
 
-            def animate_place_code(i):
+                g1, = ax[0].plot(np.arange(0, 1000), grids[0][0])
+                g2, = ax[1].plot(np.arange(0, 1000), grids[1][0])
+                g3, = ax[2].plot(np.arange(0, 1000), grids[2][0])
+                g4, = ax[3].plot(np.arange(0, 1000), grids[3][0])
+                pc, = ax[4].plot(np.arange(0, 1000), place_code[0])
+                text = ax[-1].text(0, 0, "")
 
-                g1.set_data(np.arange(0, 1000), grids[0][i])
-                g2.set_data(np.arange(0, 1000), grids[1][i])
-                g3.set_data(np.arange(0, 1000), grids[2][i])
-                g4.set_data(np.arange(0, 1000), grids[3][i])
-                pc.set_data(np.arange(0, 1000), place_code[i])
-                text.set_text("{}/{}".format(i+1, len(grids[0])))
+                for i, axis in enumerate(ax):
 
-                return g1, g2, g3, g4, pc
-        
-            ani = FuncAnimation(fig, animate_place_code, frames = len(grids[0]), interval = 100)
+                    if i < 4:
+
+                        axis.set_ylim(0, np.max(grids[0]))
+
+                    elif i == 4:
+
+                        axis.set_ylim(0, np.max(place_code))
+
+                def animate_place_code(i):
+
+                    g1.set_data(np.arange(0, 1000), grids[0][i])
+                    g2.set_data(np.arange(0, 1000), grids[1][i])
+                    g3.set_data(np.arange(0, 1000), grids[2][i])
+                    g4.set_data(np.arange(0, 1000), grids[3][i])
+                    pc.set_data(np.arange(0, 1000), place_code[i])
+                    text.set_text("{}/{}".format(i+1, len(grids[0])))
+
+                    return g1, g2, g3, g4, pc
+            
+                ani = FuncAnimation(fig, animate_place_code, frames = len(grids[0]), interval = 100)
+
+            else:
+
+                fig, ax = plt.subplots(len(neurons) + 1, 1, sharex = True)
+
+                g1, = ax[0].plot(np.arange(0, 1000), grids[0][0])
+                g2, = ax[1].plot(np.arange(0, 1000), grids[1][0])
+                g3, = ax[2].plot(np.arange(0, 1000), grids[2][0])
+                g4, = ax[3].plot(np.arange(0, 1000), grids[3][0])
+                pc, = ax[4].plot(np.arange(0, 1000), place_code[0])
+                text = ax[-1].text(0, 0, "")
+
+                def animate_place_code(i):
+
+                    g1.set_data(np.arange(0, 1000), grids[0][i])
+                    g2.set_data(np.arange(0, 1000), grids[1][i])
+                    g3.set_data(np.arange(0, 1000), grids[2][i])
+                    g4.set_data(np.arange(0, 1000), grids[3][i])
+                    pc.set_data(np.arange(0, 1000), place_code[i])
+                    text.set_text("{}/{}".format(i+1, len(grids[0])))
+
+                    return g1, g2, g3, g4, pc
+            
+                ani = FuncAnimation(fig, animate_place_code, frames = len(grids[0]), interval = 100)
 
             plt.show()
 
@@ -615,7 +901,7 @@ derived_xy = ring2cart(ring1_displacement, ring2_displacement, ring3_displacemen
 
 # Test points
 
-#test_plot()
+test_plot()
 
 # Original (Guifen-like) arena
 
@@ -626,11 +912,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 data_files = [  "training_data_bl_tr/", "training_data_tr_bl/", "training_data_br_tl/", "training_data_tl_br/",
                 "training_data_lm_rm/", "training_data_rm_lm/", "training_data_tm_bm/", "training_data_bm_tm/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'translation')
+# generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'translation', ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+# generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+# generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 # Convert rotation set poses to ring and grid codes
 
@@ -639,11 +925,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 data_files = [  "training_data_bottom_left/", "training_data_bottom_right/", "training_data_top_left/", "training_data_top_right/",
                 "training_data_centre/", "training_data_centre_5x/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rotation')
+# generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rotation', ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+# generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+# generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 # Convert rat trajectory poses to ring codes
 
@@ -651,11 +937,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 
 data_files = [  "real_data_6005_timestamped/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rat')
+# generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rat', ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+# generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+# generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 # Generate ring and grid codes for merged (rotating and translation) dataset
 
@@ -663,11 +949,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 
 data_files = [  "training_data_vis_hd_grid/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False)
+# generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+# generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+# generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 
 # Dome arena
@@ -679,11 +965,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 data_files = [  "training_dome_bl_tr/", "training_dome_tr_bl/", "training_dome_br_tl/", "training_dome_tl_br/",
                 "training_dome_lm_rm/", "training_dome_rm_lm/", "training_dome_tm_bm/", "training_dome_bm_tm/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'translation')
+# generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'translation', ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+# generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+# generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 # Generate ring and grid codes for rotation sets
 
@@ -694,11 +980,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 data_files = [  "training_dome_bottom_left/", "training_dome_bottom_right/", "training_dome_top_left/", "training_dome_top_right/",
                 "training_dome_centre_5x/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rotation')
+# generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rotation', ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+# generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+# generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 # Generate ring and grid codes for rat trajectory
 
@@ -706,11 +992,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 
 data_files = [  "real_dome_6005_timestamped/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rat')
+# generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rat', ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+# generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+# generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 # Generate ring and grid codes for merged (rotating and translation) dataset
 
@@ -718,11 +1004,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 
 data_files = [  "training_dome_vis_hd_grid/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False)
+# generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+# generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+# generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 
 # Oracle arena
@@ -733,11 +1019,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 
 data_files = [  "bl_tr/", "tr_bl/", "br_tl/", "tl_br/", "lm_rm/", "rm_lm/", "tm_bm/", "bm_tm/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'translation')
+# generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'translation', ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+# generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+# generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 # Convert rotation set poses to ring and grid codes
 
@@ -745,11 +1031,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 
 data_files = [  "bottom_left/", "bottom_right/", "top_left/", "top_right/", "centre/", "centre_5x/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rotation')
+# generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rotation', ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+# generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
+# generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = False)
 
 # Convert rat trajectory poses to ring codes
 
@@ -757,11 +1043,11 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 
 data_files= [   "real_rat/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, data_type = 'rat')
+generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = True, data_type = 'rat', ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = True, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = True)
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = True, grid_value = grid_value)
 
 # Generate ring and grid codes for merged (rotating and translation) dataset
 
@@ -769,8 +1055,8 @@ data_folder =   "C:/Users/Tom/Downloads/HBP/multimodalplacerecognition_datasets/
 
 data_files= [   "training_data_vis_hd_grid/"]
 
-generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False)
+generate_ring_codes(data_folder = data_folder, data_files = data_files, offset = offset, vel_gain = vel_gain, plot = False, ring_gaussian = ring_gaussian)
 
-generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False)
+generate_grid_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = True, grid_value = grid_value, grid_format = grid_format)
 
-generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = True)
+generate_place_codes(data_folder = data_folder, data_files = data_files, neuron_count = neurons, plot = False, animate = True, grid_value = grid_value)
